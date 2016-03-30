@@ -1,5 +1,8 @@
 extern crate mio;
 extern crate bit_set;
+#[macro_use]
+extern crate log;
+extern crate env_logger;
 
 pub mod proxy;
 
@@ -11,7 +14,13 @@ use std::sync::mpsc::{Receiver};
 use proxy::tcp::TcpProxy;
 use bit_set::BitSet;
 
+use std::env;
+use log::{LogRecord, LogLevelFilter};
+use env_logger::LogBuilder;
+
 fn main() {
+    initialize_logger();
+
     let mut event_loop = EventLoop::new().unwrap();
     let sender = event_loop.channel();
 
@@ -77,6 +86,8 @@ impl Handler for MyHandler {
         let server = TcpListener::bind(&addr).unwrap();
         let token = self.claim_token().unwrap();
 
+        info!("Open listener at port 8000 with token {}", token.as_usize());
+
         event_loop.register(
             &server,
             token,
@@ -86,4 +97,21 @@ impl Handler for MyHandler {
 
         self.listeners.push(server);
     }
+}
+
+
+fn initialize_logger() {
+	let format = |record: &LogRecord| {
+        format!("{} - {}:{} - {}", record.level(), record.location().file(), record.location().line(), record.args())
+    };
+
+    let mut builder = LogBuilder::new();
+    builder.format(format).filter(None, LogLevelFilter::Info);
+
+    if env::var("RUST_LOG").is_ok() {
+       builder.parse(&env::var("RUST_LOG").unwrap());
+    }
+
+    builder.init().unwrap();
+
 }
