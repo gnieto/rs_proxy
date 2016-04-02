@@ -77,11 +77,14 @@ impl MyHandler {
         self.tokens.remove(token.as_usize());
     }
 
-    pub fn proxy(&self, input: &str, stream: TcpStream) -> (Box<Connection>, Box<Connection>) {
+    pub fn proxy(&mut self, input: &str, stream: TcpStream) -> (Box<Connection>, Box<Connection>) {
         let addr: SocketAddr = input.parse().unwrap();
 
-        let downstream = TcpConnection::new(1024, stream, Token(1));
-        let upstream = TcpConnection::new(1024, TcpStream::connect(&addr).unwrap(), Token(2));
+        let downstream_token = self.claim_token().unwrap();
+        let upstream_token = self.claim_token().unwrap();
+
+        let downstream = TcpConnection::new(1024, stream, downstream_token);
+        let upstream = TcpConnection::new(1024, TcpStream::connect(&addr).unwrap(), upstream_token);
 
         (Box::new(downstream), Box::new(upstream))
     }
@@ -93,9 +96,6 @@ impl MyHandler {
 
         info!("Inbound connection with token {:?}!", token);
 
-        let downstream_token = self.claim_token().unwrap();
-        let upstream_token = self.claim_token().unwrap();
-
         let tcp_stream = {
             let acceptor = self.acceptors.get_mut(&token).unwrap();
             let (tcp_stream, _) = acceptor.accept().unwrap().unwrap();
@@ -104,6 +104,7 @@ impl MyHandler {
 
         let (downstream, upstream) = self.proxy("127.0.0.1:8001", tcp_stream);
         let mut proxy = TcpProxy::new(downstream, upstream);
+        let (downstream_token, upstream_token) = proxy.tokens();
 
         event_loop.register(proxy.get_downstream().get_evented(), downstream_token, EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge());
         event_loop.register(proxy.get_upstream().get_evented(), upstream_token, EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge());
@@ -118,32 +119,9 @@ impl MyHandler {
     }
 
     pub fn handle_connection(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token, event_set: EventSet) {
-        info!("Handle connection with token {:?}", token);
+        info!("Handle connection with token {:?} with events {:?}", token, event_set);
 
-        if event_set.is_hup() || event_set.is_error() {
-            let tokens = {
-                match self.connections.get_mut(&token) {
-                    Some(&mut(ref role, ref mut ref_proxy)) => {
-                        Some(ref_proxy.borrow().tokens())
-                    },
-                    None => {
-                        None
-                    }
-                }
-            };
-
-            match tokens {
-                Some((ds_token, us_token)) => {
-                    info!("Downstream connection has hung up. Freeing tokens {:?} and {:?}", ds_token, us_token);
-                    self.connections.remove(&ds_token);
-                    self.connections.remove(&us_token);
-
-                    self.return_token(ds_token);
-                    self.return_token(us_token);
-                },
-                None => {()}
-            }
-        } else {
+        if event_set.is_readable() {
             match self.connections.get_mut(&token) {
                 None => (),
                 Some(&mut(ref role, ref mut ref_proxy)) => {
@@ -173,16 +151,69 @@ impl MyHandler {
                                 }
 
                                 info!("Reregistering");
-                                event_loop.register(proxy.get_downstream().get_evented(), token, EventSet::readable(), PollOpt::edge());
+
+                                let ds = proxy.get_downstream();
+                                event_loop.reregister(ds.get_evented(), ds.get_token(), EventSet::writable(), PollOpt::edge());
+                                let us = proxy.get_upstream();
+                                event_loop.reregister(us.get_evented(), us.get_token(), EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge());
                             }
                         },
                         &Role::Upstream => {
                             // Handle upstream connection
-                            info!("Handle upstream. EventSet: {:?}", event_set)
+                            info!("Handle upstream. EventSet: {:?}", event_set);
+                            if event_set.is_readable() {
+                                let mut buffer = [0; 4];
+                                let mut proxy = ref_proxy.borrow_mut();
+
+                                loop {
+                                    let read_response = proxy.get_mut_upstream().read(&mut buffer[..]);
+
+                                    let amount = match read_response {
+                                        Err(_) => 0,
+                                        Ok(amount) => amount,
+                                    };
+
+                                    if amount == 0 {
+                                        break;
+                                    }
+
+                                    info!("Amount of bytes: {}", amount);
+                                    proxy.get_mut_downstream().write(&buffer).unwrap();
+                                }
+
+                                info!("Reregistering Upstream");
+                                event_loop.reregister(proxy.get_upstream().get_evented(), token, EventSet::writable(), PollOpt::edge());
+                                event_loop.reregister(proxy.get_downstream().get_evented(), token, EventSet::readable(), PollOpt::edge());
+                            }
                         }
                     };
                     ()
                 }
+            }
+        }
+
+        if event_set.is_hup() || event_set.is_error() {
+            let tokens = {
+                match self.connections.get_mut(&token) {
+                    Some(&mut(ref role, ref mut ref_proxy)) => {
+                        Some(ref_proxy.borrow().tokens())
+                    },
+                    None => {
+                        None
+                    }
+                }
+            };
+
+            match tokens {
+                Some((ds_token, us_token)) => {
+                    info!("Downstream connection has hung up. Freeing tokens {:?} and {:?}", ds_token, us_token);
+                    self.connections.remove(&ds_token);
+                    self.connections.remove(&us_token);
+
+                    self.return_token(ds_token);
+                    self.return_token(us_token);
+                },
+                None => {()}
             }
         }
     }
@@ -198,45 +229,6 @@ impl Handler for MyHandler {
         } else {
             self.handle_accept(event_loop, token);
         }
-
-        /*match self.connections.contains_key(&token) {
-            false => {
-
-            },
-            true => {
-
-            }
-            Some(&mut (ref role, ref mut connection)) => {
-                match role {
-                    &Role::Downstream => {
-                        info!("Read event!");
-                        let mut buffer = [0; 4];
-                        let mut proxy = connection.borrow_mut();
-
-                        loop {
-                            let read_response = proxy.get_downstream().read(&mut buffer[..]);
-
-                            let amount = match read_response {
-                                Err(_) => 0,
-                                Ok(amount) => amount,
-                            };
-
-                            if amount == 0 {
-                                break;
-                            }
-
-                            info!("Amount of bytes: {}", amount);
-                            proxy.get_upstream().write(&buffer).unwrap();
-                        }
-
-                        event_loop.register(proxy.get_downstream().get_evented(), token, EventSet::readable(), PollOpt::edge());
-                    },
-                    &Role::Upstream => {
-                        info!("Socket has some event!");
-                    }
-                }
-            }
-        }*/
     }
 
     fn notify(&mut self, event_loop: &mut EventLoop<MyHandler>, msg: u32) {
