@@ -11,15 +11,10 @@ pub struct TcpProxy {
 }
 
 impl TcpProxy {
-    pub fn new(input: &str, stream: TcpStream) -> Self {
-        let addr: SocketAddr = input.parse().unwrap();
-
-        let downstream = TcpConnection::new(1024, stream, Token(1));
-        let upstream = TcpConnection::new(1024, TcpStream::connect(&addr).unwrap(), Token(2));
-
+    pub fn new(downstream: Box<Connection>, upstream: Box<Connection>) -> Self {
         TcpProxy {
-            downstream: Box::new(downstream),
-            upstream: Box::new(upstream),
+            downstream: downstream,
+            upstream: upstream,
         }
     }
 }

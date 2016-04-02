@@ -14,12 +14,16 @@ use std::sync::mpsc::channel;
 use std::sync::mpsc::{Receiver};
 use proxy::tcp::TcpProxy;
 use bit_set::BitSet;
+use std::net::SocketAddr;
 
 use std::env;
 use log::{LogRecord, LogLevelFilter};
 use env_logger::LogBuilder;
 use std::io::Read;
 use proxy::Proxy;
+use connection::Connection;
+use connection::tcp_connection::TcpConnection;
+use connection::poison::DropAllConnection;
 
 fn main() {
     initialize_logger();
@@ -69,6 +73,15 @@ impl MyHandler {
     pub fn return_token(&mut self, token: Token) {
         self.tokens.remove(token.as_usize());
     }
+
+    pub fn proxy(&self, input: &str, stream: TcpStream) -> (Box<Connection>, Box<Connection>) {
+        let addr: SocketAddr = input.parse().unwrap();
+
+        let downstream = TcpConnection::new(1024, stream, Token(1));
+        let upstream = TcpConnection::new(1024, TcpStream::connect(&addr).unwrap(), Token(2));
+
+        (Box::new(downstream), Box::new(upstream))
+    }
 }
 
 impl Handler for MyHandler {
@@ -85,7 +98,8 @@ impl Handler for MyHandler {
                 let ref acceptor = self.listeners[0];
                 let (tcp_stream, _) = acceptor.accept().unwrap().unwrap();
 
-                let proxy = TcpProxy::new("127.0.0.1:8001", tcp_stream);
+                let (downstream, upstream) = self.proxy("127.0.0.1:8001", tcp_stream);
+                let proxy = TcpProxy::new(downstream, Box::new(DropAllConnection::new(upstream)));
                 self.connections.push(Box::new(proxy));
 
                 event_loop.register(self.connections[0].get_downstream().get_evented(), read_token, EventSet::readable(), PollOpt::edge());
