@@ -15,6 +15,9 @@ use std::sync::mpsc::{Receiver};
 use proxy::tcp::TcpProxy;
 use bit_set::BitSet;
 use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 use std::env;
 use log::{LogRecord, LogLevelFilter};
@@ -42,7 +45,7 @@ fn main() {
 
 struct MyHandler {
     listeners: Vec<TcpListener>,
-    connections: Vec<Box<Proxy>>,
+    connections: HashMap<Token, Rc<RefCell<Proxy>>>,
     tokens: BitSet,
 }
 
@@ -50,8 +53,8 @@ impl MyHandler {
     pub fn new() -> Self {
         MyHandler {
             listeners: Vec::new(),
-            connections: Vec::new(),
             tokens: BitSet::with_capacity(4096), // TODO: Read from EventLoop configuration
+            connections: HashMap::new(),
         }
     }
 
@@ -99,21 +102,25 @@ impl Handler for MyHandler {
                 let (tcp_stream, _) = acceptor.accept().unwrap().unwrap();
 
                 let (downstream, upstream) = self.proxy("127.0.0.1:8001", tcp_stream);
-                let proxy = TcpProxy::new(downstream, Box::new(DropAllConnection::new(upstream)));
-                self.connections.push(Box::new(proxy));
+                let mut proxy = TcpProxy::new(downstream, upstream/*Box::new(DropAllConnection::new(upstream))*/);
 
-                event_loop.register(self.connections[0].get_downstream().get_evented(), read_token, EventSet::readable(), PollOpt::edge());
-                event_loop.register(self.connections[0].get_upstream().get_evented(), write_token, EventSet::writable(), PollOpt::edge());
+                event_loop.register(proxy.get_downstream().get_evented(), read_token, EventSet::readable(), PollOpt::edge());
+                event_loop.register(proxy.get_upstream().get_evented(), write_token, EventSet::writable(), PollOpt::edge());
+
+                let bp = Rc::new(RefCell::new(proxy));
+                self.connections.insert(Token(1), bp.clone());
+                self.connections.insert(Token(2), bp.clone());
             },
             Token(1) => {
                 info!("Read event!");
                 let mut buffer = [0; 1024];
-                // let amount = self.connections[0].input_read().read(&mut buffer[..]).unwrap();
-                let amount = self.connections[0].get_downstream().read(&mut buffer[..]).unwrap();
-                info!("Amount of bytes: {}", amount);
 
-                // info!("Read: {}", buffer);
-                self.connections[0].get_upstream().write(&buffer).unwrap();
+                let mut proxy = self.connections[&token].borrow_mut();
+                let amount = proxy.get_downstream().read(&mut buffer[..]).unwrap();
+                info!("Amount of bytes: {}", amount);
+                proxy.get_upstream().write(&buffer).unwrap();
+
+                event_loop.register(proxy.get_downstream().get_evented(), token, EventSet::readable(), PollOpt::edge());
             },
             Token(2) => {
                 info!("Socket has some event!");
