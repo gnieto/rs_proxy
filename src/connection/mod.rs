@@ -9,3 +9,8 @@ pub trait Connection: Read + Write {
     fn get_evented(&self) -> &Evented;
     fn get_token(&self) -> Token;
 }
+
+pub enum Role {
+    Downstream,
+    Upstream,
+}

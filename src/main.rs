@@ -24,7 +24,7 @@ use log::{LogRecord, LogLevelFilter};
 use env_logger::LogBuilder;
 use std::io::Read;
 use proxy::Proxy;
-use connection::Connection;
+use connection::{Connection, Role};
 use connection::tcp_connection::TcpConnection;
 use connection::poison::DropAllConnection;
 
@@ -44,17 +44,17 @@ fn main() {
 }
 
 struct MyHandler {
-    listeners: Vec<TcpListener>,
-    connections: HashMap<Token, Rc<RefCell<Proxy>>>,
+    connections: HashMap<Token, (Role, Rc<RefCell<Proxy>>)>,
+    acceptors: HashMap<Token, TcpListener>,
     tokens: BitSet,
 }
 
 impl MyHandler {
     pub fn new() -> Self {
         MyHandler {
-            listeners: Vec::new(),
             tokens: BitSet::with_capacity(4096), // TODO: Read from EventLoop configuration
             connections: HashMap::new(),
+            acceptors: HashMap::new(),
         }
     }
 
@@ -85,50 +85,132 @@ impl MyHandler {
 
         (Box::new(downstream), Box::new(upstream))
     }
+
+    pub fn handle_accept(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token) -> Option<(Token, Token)>{
+        if !self.acceptors.contains_key(&token) {
+            return None
+        }
+
+        info!("Inbound connection with token {:?}!", token);
+
+        let downstream_token = self.claim_token().unwrap();
+        let upstream_token = self.claim_token().unwrap();
+
+        let tcp_stream = {
+            let acceptor = self.acceptors.get_mut(&token).unwrap();
+            let (tcp_stream, _) = acceptor.accept().unwrap().unwrap();
+            tcp_stream
+        };
+
+        let (downstream, upstream) = self.proxy("127.0.0.1:8001", tcp_stream);
+        let mut proxy = TcpProxy::new(downstream, upstream);
+
+        event_loop.register(proxy.get_downstream().get_evented(), downstream_token, EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge());
+        event_loop.register(proxy.get_upstream().get_evented(), upstream_token, EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge());
+
+        let bp = Rc::new(RefCell::new(proxy));
+        self.connections.insert(downstream_token, (Role::Downstream, bp.clone()));
+        self.connections.insert(upstream_token, (Role::Upstream, bp.clone()));
+
+        info!("Registered downstream_connection {:?} and upstream_connection {:?}", downstream_token, upstream_token);
+
+        Some((downstream_token, upstream_token))
+    }
+
+    pub fn handle_connection(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token, event_set: EventSet) {
+        info!("Handle connection with token {:?}", token);
+
+        match self.connections.get_mut(&token) {
+            None => (),
+            Some(&mut(ref role, ref mut ref_proxy)) => {
+                match role {
+                    &Role::Downstream => {
+                        // Handle downstream connection
+                        info!("Handle downstream. EventSet: {:?}", event_set);
+                        if event_set.is_readable() {
+                            let mut buffer = [0; 4];
+                            let mut proxy = ref_proxy.borrow_mut();
+
+                            loop {
+                                let read_response = proxy.get_downstream().read(&mut buffer[..]);
+
+                                let amount = match read_response {
+                                    Err(_) => 0,
+                                    Ok(amount) => amount,
+                                };
+
+                                if amount == 0 {
+                                    break;
+                                }
+
+                                info!("Amount of bytes: {}", amount);
+                                proxy.get_upstream().write(&buffer).unwrap();
+                            }
+
+                            info!("Reregistering");
+                            event_loop.register(proxy.get_downstream().get_evented(), token, EventSet::readable(), PollOpt::edge());
+                        }
+                    },
+                    &Role::Upstream => {
+                        // Handle upstream connection
+                        info!("Handle upstream. EventSet: {:?}", event_set)
+                    }
+                };
+                ()
+            }
+        }
+    }
 }
 
 impl Handler for MyHandler {
     type Timeout = ();
     type Message = u32;
 
-    fn ready(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token, _: EventSet) {
-        match token {
-            Token(0) => {
-                info!("Inbound connection!");
-                let read_token = self.claim_token().unwrap();
-                let write_token = self.claim_token().unwrap();
-
-                let ref acceptor = self.listeners[0];
-                let (tcp_stream, _) = acceptor.accept().unwrap().unwrap();
-
-                let (downstream, upstream) = self.proxy("127.0.0.1:8001", tcp_stream);
-                let mut proxy = TcpProxy::new(downstream, upstream/*Box::new(DropAllConnection::new(upstream))*/);
-
-                event_loop.register(proxy.get_downstream().get_evented(), read_token, EventSet::readable(), PollOpt::edge());
-                event_loop.register(proxy.get_upstream().get_evented(), write_token, EventSet::writable(), PollOpt::edge());
-
-                let bp = Rc::new(RefCell::new(proxy));
-                self.connections.insert(Token(1), bp.clone());
-                self.connections.insert(Token(2), bp.clone());
-            },
-            Token(1) => {
-                info!("Read event!");
-                let mut buffer = [0; 1024];
-
-                let mut proxy = self.connections[&token].borrow_mut();
-                let amount = proxy.get_downstream().read(&mut buffer[..]).unwrap();
-                info!("Amount of bytes: {}", amount);
-                proxy.get_upstream().write(&buffer).unwrap();
-
-                event_loop.register(proxy.get_downstream().get_evented(), token, EventSet::readable(), PollOpt::edge());
-            },
-            Token(2) => {
-                info!("Socket has some event!");
-            }
-            _ => {
-                println!("Unknown token");
-            }
+    fn ready(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token, event_set: EventSet) {
+        if self.connections.contains_key(&token) {
+            self.handle_connection(event_loop, token, event_set);
+        } else {
+            self.handle_accept(event_loop, token);
         }
+
+        /*match self.connections.contains_key(&token) {
+            false => {
+
+            },
+            true => {
+
+            }
+            Some(&mut (ref role, ref mut connection)) => {
+                match role {
+                    &Role::Downstream => {
+                        info!("Read event!");
+                        let mut buffer = [0; 4];
+                        let mut proxy = connection.borrow_mut();
+
+                        loop {
+                            let read_response = proxy.get_downstream().read(&mut buffer[..]);
+
+                            let amount = match read_response {
+                                Err(_) => 0,
+                                Ok(amount) => amount,
+                            };
+
+                            if amount == 0 {
+                                break;
+                            }
+
+                            info!("Amount of bytes: {}", amount);
+                            proxy.get_upstream().write(&buffer).unwrap();
+                        }
+
+                        event_loop.register(proxy.get_downstream().get_evented(), token, EventSet::readable(), PollOpt::edge());
+                    },
+                    &Role::Upstream => {
+                        info!("Socket has some event!");
+                    }
+                }
+            }
+        }*/
     }
 
     fn notify(&mut self, event_loop: &mut EventLoop<MyHandler>, msg: u32) {
@@ -145,7 +227,7 @@ impl Handler for MyHandler {
             PollOpt::edge()
         ).unwrap();
 
-        self.listeners.push(server);
+        self.acceptors.insert(token, server);
     }
 }
 
