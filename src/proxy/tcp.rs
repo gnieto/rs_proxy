@@ -20,11 +20,19 @@ impl TcpProxy {
 }
 
 impl Proxy for TcpProxy {
-    fn get_upstream(&mut self) -> &mut Connection {
+    fn get_upstream(&self) -> &Connection {
+        return &*self.upstream;
+    }
+
+    fn get_downstream(&self) -> &Connection {
+        return &*self.downstream;
+    }
+
+    fn get_mut_upstream(&mut self) -> &mut Connection {
         return &mut *self.upstream;
     }
 
-    fn get_downstream(&mut self) -> &mut Connection {
+    fn get_mut_downstream(&mut self) -> &mut Connection {
         return &mut *self.downstream;
     }
 }

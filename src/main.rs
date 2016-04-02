@@ -120,43 +120,69 @@ impl MyHandler {
     pub fn handle_connection(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token, event_set: EventSet) {
         info!("Handle connection with token {:?}", token);
 
-        match self.connections.get_mut(&token) {
-            None => (),
-            Some(&mut(ref role, ref mut ref_proxy)) => {
-                match role {
-                    &Role::Downstream => {
-                        // Handle downstream connection
-                        info!("Handle downstream. EventSet: {:?}", event_set);
-                        if event_set.is_readable() {
-                            let mut buffer = [0; 4];
-                            let mut proxy = ref_proxy.borrow_mut();
+        if event_set.is_hup() || event_set.is_error() {
+            let tokens = {
+                match self.connections.get_mut(&token) {
+                    Some(&mut(ref role, ref mut ref_proxy)) => {
+                        Some(ref_proxy.borrow().tokens())
+                    },
+                    None => {
+                        None
+                    }
+                }
+            };
 
-                            loop {
-                                let read_response = proxy.get_downstream().read(&mut buffer[..]);
+            match tokens {
+                Some((ds_token, us_token)) => {
+                    info!("Downstream connection has hung up. Freeing tokens {:?} and {:?}", ds_token, us_token);
+                    self.connections.remove(&ds_token);
+                    self.connections.remove(&us_token);
 
-                                let amount = match read_response {
-                                    Err(_) => 0,
-                                    Ok(amount) => amount,
-                                };
+                    self.return_token(ds_token);
+                    self.return_token(us_token);
+                },
+                None => {()}
+            }
+        } else {
+            match self.connections.get_mut(&token) {
+                None => (),
+                Some(&mut(ref role, ref mut ref_proxy)) => {
+                    match role {
+                        &Role::Downstream => {
+                            // Handle downstream connection
+                            info!("Handle downstream. EventSet: {:?}", event_set);
 
-                                if amount == 0 {
-                                    break;
+                            if event_set.is_readable() {
+                                let mut buffer = [0; 4];
+                                let mut proxy = ref_proxy.borrow_mut();
+
+                                loop {
+                                    let read_response = proxy.get_mut_downstream().read(&mut buffer[..]);
+
+                                    let amount = match read_response {
+                                        Err(_) => 0,
+                                        Ok(amount) => amount,
+                                    };
+
+                                    if amount == 0 {
+                                        break;
+                                    }
+
+                                    info!("Amount of bytes: {}", amount);
+                                    proxy.get_mut_upstream().write(&buffer).unwrap();
                                 }
 
-                                info!("Amount of bytes: {}", amount);
-                                proxy.get_upstream().write(&buffer).unwrap();
+                                info!("Reregistering");
+                                event_loop.register(proxy.get_downstream().get_evented(), token, EventSet::readable(), PollOpt::edge());
                             }
-
-                            info!("Reregistering");
-                            event_loop.register(proxy.get_downstream().get_evented(), token, EventSet::readable(), PollOpt::edge());
+                        },
+                        &Role::Upstream => {
+                            // Handle upstream connection
+                            info!("Handle upstream. EventSet: {:?}", event_set)
                         }
-                    },
-                    &Role::Upstream => {
-                        // Handle upstream connection
-                        info!("Handle upstream. EventSet: {:?}", event_set)
-                    }
-                };
-                ()
+                    };
+                    ()
+                }
             }
         }
     }
