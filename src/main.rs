@@ -187,80 +187,13 @@ impl MyHandler {
                     info!("Handle upstream. EventSet: {:?}", event_set);
                 },
             }
-
-            /*match self.connections.get_mut(&token) {
-                None => (),
-                Some(&mut(ref role, ref mut ref_proxy)) => {
-                    match role {
-                        &Role::Downstream => {
-                            // Handle downstream connection
-                            info!("Handle downstream. EventSet: {:?}", event_set);
-
-                            if event_set.is_readable() {
-                                let mut buffer = [0; 4];
-                                let mut proxy = ref_proxy.borrow_mut();
-
-                                loop {
-                                    let read_response = proxy.get_mut_downstream().read(&mut buffer[..]);
-
-                                    let amount = match read_response {
-                                        Err(_) => 0,
-                                        Ok(amount) => amount,
-                                    };
-
-                                    if amount == 0 {
-                                        break;
-                                    }
-
-                                    info!("Amount of bytes: {}", amount);
-                                    proxy.get_mut_upstream().write(&buffer).unwrap();
-                                }
-
-                                info!("Reregistering");
-
-                                let ds = proxy.get_downstream();
-                                event_loop.reregister(ds.get_evented(), ds.get_token(), EventSet::writable(), PollOpt::edge());
-                                let us = proxy.get_upstream();
-                                event_loop.reregister(us.get_evented(), us.get_token(), EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge());
-                            }
-                        },
-                        &Role::Upstream => {
-                            // Handle upstream connection
-                            info!("Handle upstream. EventSet: {:?}", event_set);
-                            if event_set.is_readable() {
-                                let mut buffer = [0; 4];
-                                let mut proxy = ref_proxy.borrow_mut();
-
-                                loop {
-                                    let read_response = proxy.get_mut_upstream().read(&mut buffer[..]);
-
-                                    let amount = match read_response {
-                                        Err(_) => 0,
-                                        Ok(amount) => amount,
-                                    };
-
-                                    if amount == 0 {
-                                        break;
-                                    }
-
-                                    info!("Amount of bytes: {}", amount);
-                                    proxy.get_mut_downstream().write(&buffer).unwrap();
-                                }
-
-                                info!("Reregistering Upstream");
-                            }
-                        }
-                    };
-                    ()
-                }
-            }*/
         }
 
         if event_set.is_hup() || event_set.is_error() {
             // TODO: We can't remove once one connection is HUP. If upstream hup connection, we need to wait until downstream finishes the write to the final client
             // One approach probably is to let the proxy decide when it should be marked as hup
             info!("The connection with token {:?} has an error or has closed", token);
-            self.remove_proxy(event_loop, &token);
+            // Check if proxy is closeable!
         }
     }
 

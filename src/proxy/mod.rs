@@ -8,6 +8,7 @@ use std::cell::RefCell;
 pub struct Proxy {
     downstream: Rc<RefCell<Connection>>,
     upstream: Rc<RefCell<Connection>>,
+    upstream_closed: bool,
 }
 
 impl Proxy {
@@ -15,6 +16,7 @@ impl Proxy {
         Proxy {
             downstream: downstream,
             upstream: upstream,
+            upstream_closed: false,
         }
     }
 
@@ -36,6 +38,10 @@ impl Proxy {
         let upstream_token = us_borrow.get_token();
 
         (downstream_token, upstream_token)
+    }
+
+    pub fn upstream_closed(&mut self) {
+        self.upstream_closed = true;
     }
 }
 
