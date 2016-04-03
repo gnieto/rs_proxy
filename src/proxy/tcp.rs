@@ -4,14 +4,16 @@ use mio::Token;
 use connection::Connection;
 use connection::tcp_connection::TcpConnection;
 use proxy::Proxy;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 pub struct TcpProxy {
-    downstream: Box<Connection>,
-    upstream: Box<Connection>,
+    downstream: Rc<RefCell<Connection>>,
+    upstream: Rc<RefCell<Connection>>,
 }
 
 impl TcpProxy {
-    pub fn new(downstream: Box<Connection>, upstream: Box<Connection>) -> Self {
+    pub fn new(downstream: Rc<RefCell<Connection>>, upstream: Rc<RefCell<Connection>>) -> Self {
         TcpProxy {
             downstream: downstream,
             upstream: upstream,
@@ -20,19 +22,11 @@ impl TcpProxy {
 }
 
 impl Proxy for TcpProxy {
-    fn get_upstream(&self) -> &Connection {
-        return &*self.upstream;
+    fn get_upstream(&self) -> Rc<RefCell<Connection>> {
+        return self.upstream.clone();
     }
 
-    fn get_downstream(&self) -> &Connection {
-        return &*self.downstream;
-    }
-
-    fn get_mut_upstream(&mut self) -> &mut Connection {
-        return &mut *self.upstream;
-    }
-
-    fn get_mut_downstream(&mut self) -> &mut Connection {
-        return &mut *self.downstream;
+    fn get_downstream(&self) -> Rc<RefCell<Connection>> {
+        return self.downstream.clone();
     }
 }

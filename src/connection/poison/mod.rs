@@ -25,6 +25,10 @@ impl Connection for DropAllConnection {
     fn get_token(&self) -> Token {
         return self.connection.get_token();
     }
+
+    fn get_mut_buffer(&mut self) -> &mut [u8] {
+        return self.connection.get_mut_buffer()
+    }
 }
 
 impl Read for DropAllConnection {

@@ -1,12 +1,12 @@
 use mio::{Token, Evented};
 use mio::tcp::TcpStream;
 use connection::Connection;
-use std::io::Read;
-use std::io::Write;
 use std::io::Result;
+use bytes::RingBuf;
+use connection::BufferState;
 
 pub struct TcpConnection {
-    buffer: Vec<u8>,
+    buffer: RingBuf,
     stream: TcpStream,
     token: Token,
 }
@@ -14,7 +14,7 @@ pub struct TcpConnection {
 impl TcpConnection {
     pub fn new(size: usize, stream: TcpStream, token: Token) -> Self {
         TcpConnection {
-            buffer: Vec::with_capacity(size),
+            buffer: RingBuf::new(size),
             stream: stream,
             token: token,
         }
@@ -29,20 +29,35 @@ impl Connection for TcpConnection {
     fn get_token(&self) -> Token {
         return self.token;
     }
-}
 
-impl Read for TcpConnection {
-    fn read(&mut self, buffer: &mut [u8]) -> Result<usize> {
-        return self.stream.read(buffer)
+    fn handle_read(&mut self) -> BufferState {
+        use bytes::buf::MutBuf;
+        use std::io::Read;
+
+        let a = unsafe{ self.stream.read(&mut self.buffer.mut_bytes()) };
+
+        match a {
+            Ok(amount) => {
+                unsafe {MutBuf::advance(&mut self.buffer, amount)};
+            },
+            _ => (),
+        };
+
+        info!("Vector size: {}; Capacity: {};", self.buffer.remaining(), self.buffer.capacity());
+
+        return BufferState::Remaining(self.buffer.remaining());
     }
-}
 
-impl Write for TcpConnection {
-    fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        return self.stream.write(buf)
+    fn handle_write(&mut self, buffer: &[u8]) {
+        use bytes::buf::Buf;
+        use std::io::Write;
+
+        let result = self.stream.write(buffer);
+        info!("Write result {:?}", result)
     }
 
-    fn flush(&mut self) -> Result<()> {
-        return self.stream.flush()
+    fn get_buffer(&self) -> &[u8] {
+        use bytes::buf::Buf;
+        return self.buffer.bytes();
     }
 }
