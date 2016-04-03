@@ -1,7 +1,6 @@
 use mio::{Token, Evented};
 use mio::tcp::TcpStream;
 use connection::Connection;
-use std::io::Result;
 use bytes::RingBuf;
 use connection::BufferState;
 
@@ -49,7 +48,6 @@ impl Connection for TcpConnection {
     }
 
     fn handle_write(&mut self, buffer: &[u8]) {
-        use bytes::buf::Buf;
         use std::io::Write;
 
         let result = self.stream.write(buffer);

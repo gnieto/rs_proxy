@@ -1,5 +1,3 @@
-use std::io::Read;
-use std::io::Write;
 use mio::{Evented, Token};
 
 pub mod tcp_connection;
