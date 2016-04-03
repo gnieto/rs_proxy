@@ -5,16 +5,28 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-pub mod tcp;
+pub struct Proxy {
+    downstream: Rc<RefCell<Connection>>,
+    upstream: Rc<RefCell<Connection>>,
+}
 
-pub trait Proxy {
-    fn get_upstream(&self) -> Rc<RefCell<Connection>>;
-    fn get_downstream(&self) -> Rc<RefCell<Connection>>;
+impl Proxy {
+    pub fn new(downstream: Rc<RefCell<Connection>>, upstream: Rc<RefCell<Connection>>) -> Self {
+        Proxy {
+            downstream: downstream,
+            upstream: upstream,
+        }
+    }
 
-    /*fn get_mut_upstream(&mut self) -> &mut Connection;
-    fn get_mut_downstream(&self) -> &mut Box<Connection>;*/
+    pub fn get_upstream(&self) -> Rc<RefCell<Connection>> {
+        return self.upstream.clone();
+    }
 
-    fn tokens(&self) -> (Token, Token) {
+    pub fn get_downstream(&self) -> Rc<RefCell<Connection>> {
+        return self.downstream.clone();
+    }
+
+    pub fn tokens(&self) -> (Token, Token) {
         let ds = self.get_downstream();
         let ds_borrow = ds.borrow();
         let downstream_token = ds_borrow.get_token();

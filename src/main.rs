@@ -13,7 +13,6 @@ use mio::tcp::{TcpListener, TcpStream};
 use std::thread;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::{Receiver};
-use proxy::tcp::TcpProxy;
 use bit_set::BitSet;
 use std::net::SocketAddr;
 use std::collections::HashMap;
@@ -104,7 +103,7 @@ impl MyHandler {
         };
 
         let (downstream, upstream) = self.proxy("127.0.0.1:8001", tcp_stream);
-        let mut proxy = TcpProxy::new(downstream, upstream);
+        let mut proxy = Proxy::new(downstream, upstream);
         let (downstream_token, upstream_token) = proxy.tokens();
 
         let ds = proxy.get_downstream();
@@ -142,6 +141,9 @@ impl MyHandler {
                     let us = proxy.get_upstream();
                     let mut us_borrow = us.borrow_mut();
                     us_borrow.handle_write(&buffer);
+
+                    // Unregister write interest for upstream
+                    event_loop.reregister(us_borrow.get_evented(), us_borrow.get_token(), EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge());
                 },
             }
         }
