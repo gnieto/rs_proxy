@@ -28,7 +28,7 @@ use connection::tcp_connection::TcpConnection;
 fn main() {
     initialize_logger();
 
-    let mut event_loop = EventLoop::new().unwrap();
+    let mut event_loop = EventLoop::new().expect("Could not initialize the event_loop");
     let sender = event_loop.channel();
 
     // Send the notification from another thread
@@ -74,16 +74,17 @@ impl MyHandler {
         self.tokens.remove(token.as_usize());
     }
 
-    pub fn proxy(&mut self, input: &str, stream: TcpStream) -> (Rc<RefCell<Connection>>, Rc<RefCell<Connection>>) {
-        let addr: SocketAddr = input.parse().unwrap();
+    pub fn proxy(&mut self, input: &str, stream: TcpStream) -> Result<(Rc<RefCell<Connection>>, Rc<RefCell<Connection>>), &str> {
+        let addr: SocketAddr = try!(input.parse().or(Err("Could not parse the listening address")));
 
-        let downstream_token = self.claim_token().unwrap();
-        let upstream_token = self.claim_token().unwrap();
+        let downstream_token = try!(self.claim_token().ok_or("No more tokens available for downstream"));
+        let upstream_token = try!(self.claim_token().ok_or("No more tokens available for upstream"));
 
         let downstream = TcpConnection::new(1024, stream, downstream_token);
-        let upstream = TcpConnection::new(1024, TcpStream::connect(&addr).unwrap(), upstream_token);
+        let stream = try!(TcpStream::connect(&addr).or(Err("Could not connect to upstream")));
+        let upstream = TcpConnection::new(1024, stream, upstream_token);
 
-        (Rc::new(RefCell::new(downstream)), Rc::new(RefCell::new(upstream)))
+        Ok((Rc::new(RefCell::new(downstream)), Rc::new(RefCell::new(upstream))))
     }
 
     pub fn handle_accept(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token) -> Option<(Token, Token)>{
@@ -99,7 +100,7 @@ impl MyHandler {
             tcp_stream
         };
 
-        let (downstream, upstream) = self.proxy("127.0.0.1:8001", tcp_stream);
+        let (downstream, upstream) = self.proxy("127.0.0.1:8001", tcp_stream).unwrap();
         let proxy = Proxy::new(downstream, upstream);
         let (downstream_token, upstream_token) = proxy.tokens();
 
