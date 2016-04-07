@@ -100,14 +100,14 @@ impl MyHandler {
         };
 
         let (downstream, upstream) = self.proxy("127.0.0.1:8001", tcp_stream);
-        let mut proxy = Proxy::new(downstream, upstream);
+        let proxy = Proxy::new(downstream, upstream);
         let (downstream_token, upstream_token) = proxy.tokens();
 
         let ds = proxy.get_downstream();
         let us = proxy.get_upstream();
 
-        event_loop.register(ds.borrow().get_evented(), downstream_token, EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge());
-        event_loop.register(us.borrow().get_evented(), upstream_token, EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge());
+        event_loop.register(ds.borrow().get_evented(), downstream_token, EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
+        event_loop.register(us.borrow().get_evented(), upstream_token, EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
 
         let bp = Rc::new(RefCell::new(proxy));
         self.proxy_locator.link(downstream_token, Role::Downstream, bp.clone());
@@ -122,7 +122,6 @@ impl MyHandler {
         // info!("Handle connection with token {:?} with events {:?}", token, event_set);
 
         if event_set.is_writable() {
-            let has_to_close = {
             let (role, ref_proxy) = self.proxy_locator.get(&token).unwrap();
             // info!("Handling writting on token {:?} with role {:?}", token, role);
 
@@ -151,11 +150,8 @@ impl MyHandler {
             let has_to_close = proxy.is_upstream_closed();
 
             if !has_to_close {
-                event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge());
+                event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
             }
-
-            has_to_close
-            };
 
             self.handle_downstream_close(event_loop, &token);
         }
@@ -174,7 +170,7 @@ impl MyHandler {
             let (role, ref_proxy) = self.proxy_locator.get(&token).unwrap();
             // info!("Handling token {:?} with role {:?}", token, role);
 
-            let mut proxy = ref_proxy.borrow_mut();
+            let proxy = ref_proxy.borrow_mut();
             let ds = proxy.get_downstream();
             let us = proxy.get_upstream();
 
@@ -192,13 +188,13 @@ impl MyHandler {
             let bs = read_borrow.handle_read();
             match bs {
                 BufferState::Full => {
-                    event_loop.reregister(read_borrow.get_evented(), read_borrow.get_token(), EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge());
+                    event_loop.reregister(read_borrow.get_evented(), read_borrow.get_token(), EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
                 },
                 _ => ()
             }
 
             // Add writable behaviour
-            event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge());
+            event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
         }
 
         if event_set.is_hup() || event_set.is_error() {
@@ -273,7 +269,7 @@ impl Handler for MyHandler {
         }
     }
 
-    fn notify(&mut self, event_loop: &mut EventLoop<MyHandler>, msg: u32) {
+    fn notify(&mut self, event_loop: &mut EventLoop<MyHandler>, _: u32) {
         let addr = "127.0.0.1:8000".parse().unwrap();
         let server = TcpListener::bind(&addr).unwrap();
         let token = self.claim_token().unwrap();
