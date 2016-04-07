@@ -42,7 +42,7 @@ impl Connection for TcpConnection {
             _ => (),
         };
 
-        info!("Vector size: {}; Capacity: {};", self.buffer.remaining(), self.buffer.capacity());
+        info!("{:p} Vector size: {}; Capacity: {};", self, self.buffer.remaining(), self.buffer.capacity());
 
         return BufferState::Remaining(self.buffer.remaining());
     }

@@ -11,7 +11,7 @@ pub trait Connection {
     fn get_buffer(&self) -> &[u8];
 }
 
-#[derive(Debug)]
+#[derive(Copy,Clone,Debug)]
 pub enum Role {
     Downstream,
     Upstream,

@@ -43,6 +43,10 @@ impl Proxy {
     pub fn upstream_closed(&mut self) {
         self.upstream_closed = true;
     }
+
+    pub fn is_upstream_closed(&self) -> bool {
+        self.upstream_closed
+    }
 }
 
 pub struct ProxyLocator {
@@ -68,7 +72,12 @@ impl ProxyLocator {
         self.proxies.contains_key(token)
     }
 
-    pub fn get(&self, token: &Token) -> Option<&(Role, Rc<RefCell<Proxy>>)> {
-        self.proxies.get(&token)
+    pub fn get(&self, token: &Token) -> Option<(Role, Rc<RefCell<Proxy>>)> {
+        match self.proxies.get(&token) {
+            Some(&(ref role, ref refer)) => {
+                Some((*role, refer.clone()))
+            },
+            None => None,
+        }
     }
 }
