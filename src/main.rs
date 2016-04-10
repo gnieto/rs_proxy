@@ -98,6 +98,7 @@ impl MyHandler {
         };
 
         let (downstream, upstream) = self.proxy("127.0.0.1:8001", tcp_stream).unwrap();
+
         let proxy = Proxy::new(downstream, upstream);
         let (downstream_token, upstream_token) = proxy.tokens();
 
@@ -116,12 +117,9 @@ impl MyHandler {
         Ok((downstream_token, upstream_token))
     }
 
-    pub fn handle_connection(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token, event_set: EventSet) {
-        // info!("Handle connection with token {:?} with events {:?}", token, event_set);
-
+    pub fn handle_connection(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token, event_set: EventSet) -> Result<(), &str> {
         if event_set.is_writable() {
-            let (role, ref_proxy) = self.proxy_locator.get(&token).unwrap();
-            // info!("Handling writting on token {:?} with role {:?}", token, role);
+            let (role, ref_proxy) = try!{self.proxy_locator.get(&token).ok_or("Token not found")};
 
             let proxy = ref_proxy.borrow();
             let ds = proxy.get_downstream();
@@ -148,25 +146,14 @@ impl MyHandler {
             let has_to_close = proxy.is_upstream_closed();
 
             if !has_to_close {
-                event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
+                try!{event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).or(Err("Could not reregister the token"))};
             }
 
             self.handle_downstream_close(event_loop, &token);
         }
 
         if event_set.is_readable() {
-            // 1 - Check if there's something to read
-                // Something to read
-                    // Read it
-                    // Put the other connection on write interest
-                    // Write and if it has not more data to write, remove the interest
-                // Nothing to read
-                    // Skip to the next token
-
-            // 1- Recover connection
-
-            let (role, ref_proxy) = self.proxy_locator.get(&token).unwrap();
-            // info!("Handling token {:?} with role {:?}", token, role);
+            let (role, ref_proxy) = try!(self.proxy_locator.get(&token).ok_or("Token not found"));
 
             let proxy = ref_proxy.borrow_mut();
             let ds = proxy.get_downstream();
@@ -174,11 +161,9 @@ impl MyHandler {
 
             let (mut read_borrow, write_borrow) = match role {
                 Role::Downstream => {
-                    // info!("Handle downstream. EventSet: {:?}", event_set);
                     (ds.borrow_mut(), us.borrow())
                 },
                 Role::Upstream => {
-                    // info!("Handle upstream. EventSet: {:?}", event_set);
                     (us.borrow_mut(), ds.borrow())
                 },
             };
@@ -186,29 +171,30 @@ impl MyHandler {
             let bs = read_borrow.handle_read();
             match bs {
                 BufferState::Full => {
-                    event_loop.reregister(read_borrow.get_evented(), read_borrow.get_token(), EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
+                    try!{event_loop.reregister(read_borrow.get_evented(), read_borrow.get_token(), EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).or(Err("Could not reregister the token"))};
                 },
                 _ => ()
             }
 
             // Add writable behaviour
-            event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
+            try!{event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).or(Err("Could not reregister the token"))};
         }
 
         if event_set.is_hup() || event_set.is_error() {
-            let (role, ref_proxy) = self.proxy_locator.get(&token).unwrap();
+            let (role, ref_proxy) = try!{self.proxy_locator.get(&token).ok_or("Token not found")};
             match role {
                 Role::Upstream => {
-                    // info!("Marked upstream connection with token {:?} as closed", token);
                     ref_proxy.borrow_mut().upstream_closed();
                 },
                 _ => ()
             }
-        }
+        };
+
+        Ok(())
     }
 
-    fn handle_downstream_close(&mut self, event_loop: &mut EventLoop<MyHandler>, token: &Token) {
-        let (role, ref_proxy) = self.proxy_locator.get(&token).unwrap();
+    fn handle_downstream_close(&mut self, event_loop: &mut EventLoop<MyHandler>, token: &Token) -> Result<(), &str> {
+        let (role, ref_proxy) = try!{self.proxy_locator.get(&token).ok_or("Token not found")};
 
         match role {
             Role::Downstream => {
@@ -219,6 +205,8 @@ impl MyHandler {
             },
             _ => (),
         };
+
+        Ok(())
     }
 
     fn remove_proxy(&mut self, event_loop: &mut EventLoop<MyHandler>, token: &Token) {
@@ -261,7 +249,13 @@ impl Handler for MyHandler {
 
     fn ready(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token, event_set: EventSet) {
         if self.proxy_locator.has(&token) {
-            self.handle_connection(event_loop, token, event_set);
+            let handle_result = self.handle_connection(event_loop, token, event_set);
+            match handle_result {
+                Err(e) => {
+                    error!("Error found handling connection {:?} with reason: {}", token, e)
+                },
+                _ => (),
+            }
         } else {
             match self.handle_accept(event_loop, token) {
                 Err(s) => error!("{}", s),
