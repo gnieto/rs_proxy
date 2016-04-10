@@ -1,11 +1,13 @@
 use mio::{Token, Evented};
 use mio::tcp::TcpStream;
 use connection::Connection;
-use bytes::RingBuf;
-use connection::BufferState;
+use connection::ConnectionAction;
+use connection::buffer::Buffer;
+use std::io;
 
 pub struct TcpConnection {
-    buffer: RingBuf,
+    input: Buffer,
+    output: Buffer,
     stream: TcpStream,
     token: Token,
 }
@@ -13,10 +15,46 @@ pub struct TcpConnection {
 impl TcpConnection {
     pub fn new(size: usize, stream: TcpStream, token: Token) -> Self {
         TcpConnection {
-            buffer: RingBuf::new(size),
+            input: Buffer::new(size),
+            output: Buffer::new(size),
             stream: stream,
             token: token,
         }
+    }
+}
+
+impl io::Read for TcpConnection {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let pending = self.input.pending();
+        let mut buf = &mut buf[0..pending];
+
+        {
+            let read_slice = self.input.get_read_slice();
+            buf.clone_from_slice(&read_slice[0..pending]);
+        }
+        self.input.advance(pending);
+
+        Ok(pending)
+    }
+}
+
+impl io::Write for TcpConnection {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let pending = self.output.pending();
+        {
+            let write_slice = self.output.get_write_slice();
+            if write_slice.len() > 0 {
+                info!("Somethin to write!");
+            }
+            write_slice.clone_from_slice(buf);
+        }
+
+        self.output.advance(pending);
+        Ok(pending)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 
@@ -29,33 +67,41 @@ impl Connection for TcpConnection {
         return self.token;
     }
 
-    fn handle_read(&mut self) -> BufferState {
-        use bytes::buf::MutBuf;
+    fn handle_read(&mut self) -> ConnectionAction {
         use std::io::Read;
 
-        let a = unsafe{ self.stream.read(&mut self.buffer.mut_bytes()) };
-
-        match a {
+        let read_result = self.stream.read(self.input.get_write_slice());
+        match read_result {
             Ok(amount) => {
-                unsafe {MutBuf::advance(&mut self.buffer, amount)};
+                if amount > 0 {
+                    ConnectionAction::Forward(amount)
+                } else {
+                    ConnectionAction::Noop
+                }
             },
-            _ => (),
-        };
-
-        info!("{:p} Vector size: {}; Capacity: {};", self, self.buffer.remaining(), self.buffer.capacity());
-
-        return BufferState::Remaining(self.buffer.remaining());
+            Err(_) => {
+                ConnectionAction::Halt
+            }
+        }
     }
 
-    fn handle_write(&mut self, buffer: &[u8]) {
+    fn handle_write(&mut self) -> ConnectionAction {
         use std::io::Write;
 
-        let result = self.stream.write(buffer);
-        info!("Write result {:?}", result)
-    }
+        if self.output.pending() > 0 {
+            info!("Pending information to be written");
+        }
 
-    fn get_buffer(&self) -> &[u8] {
-        use bytes::buf::Buf;
-        return self.buffer.bytes();
+        let write_result = self.stream.write(&self.output.get_read_slice());
+        match write_result {
+            Ok(amount) => {
+                self.output.advance(amount);
+            },
+            Err(_) => {
+                error!("Could not read on the connection with token {:?}", self.token);
+            },
+        };
+
+        ConnectionAction::Noop
     }
 }

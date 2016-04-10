@@ -47,6 +47,40 @@ impl Proxy {
     pub fn is_upstream_closed(&self) -> bool {
         self.upstream_closed
     }
+
+    pub fn forward(&mut self, amount: usize, role: Role) {
+        let ds = self.get_downstream();
+        let us = self.get_upstream();
+
+        let (mut read_borrow, mut write_borrow) = match role {
+            Role::Downstream => {
+                let us_borrow = us.borrow_mut();
+                let ds_borrow = ds.borrow_mut();
+
+                (us_borrow, ds_borrow)
+            },
+            Role::Upstream => {
+                let ds_borrow = ds.borrow_mut();
+                let us_borrow = us.borrow_mut();
+
+                (ds_borrow, us_borrow)
+            },
+        };
+
+        let mut buf: &mut [u8] = &mut [0u8; 1024];
+        let read_result = read_borrow.read(&mut buf);
+        match read_result {
+            Ok(amount) => {
+                if amount > 0 {
+                    info!("Read result with amount: {}", amount);
+                }
+                write_borrow.write(&buf[0..amount]).unwrap();
+            },
+            Err(_) => {
+                error!("Could not read from input buffer (token: {:?})", read_borrow.get_token());
+            }
+        };
+    }
 }
 
 pub struct ProxyLocator {

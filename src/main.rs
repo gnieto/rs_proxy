@@ -22,7 +22,7 @@ use log::{LogRecord, LogLevelFilter};
 use env_logger::LogBuilder;
 use proxy::Proxy;
 use proxy::ProxyLocator;
-use connection::{Connection, Role, BufferState};
+use connection::{Connection, Role, ConnectionAction};
 use connection::tcp_connection::TcpConnection;
 
 fn main() {
@@ -105,8 +105,8 @@ impl MyHandler {
         let ds = proxy.get_downstream();
         let us = proxy.get_upstream();
 
-        event_loop.register(ds.borrow().get_evented(), downstream_token, EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
-        event_loop.register(us.borrow().get_evented(), upstream_token, EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
+        event_loop.register(ds.borrow().get_evented(), downstream_token, EventSet::readable() | EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
+        event_loop.register(us.borrow().get_evented(), upstream_token, EventSet::readable() | EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
 
         let bp = Rc::new(RefCell::new(proxy));
         self.proxy_locator.link(downstream_token, Role::Downstream, bp.clone());
@@ -121,27 +121,20 @@ impl MyHandler {
         if event_set.is_writable() {
             let (role, ref_proxy) = try!{self.proxy_locator.get(&token).ok_or("Token not found")};
 
-            let proxy = ref_proxy.borrow();
+            let proxy = ref_proxy.borrow_mut();
             let ds = proxy.get_downstream();
             let us = proxy.get_upstream();
 
-            let (read_borrow, mut write_borrow) = match role {
+            let (_, mut write_borrow) = match role {
                 Role::Downstream => {
-                    let us_borrow = us.borrow();
-                    let ds_borrow = ds.borrow_mut();
-
-                    (us_borrow, ds_borrow)
+                    (ds.borrow(), us.borrow_mut())
                 },
                 Role::Upstream => {
-                    let ds_borrow = ds.borrow();
-                    let us_borrow = us.borrow_mut();
-
-                    (ds_borrow, us_borrow)
+                    (us.borrow(), ds.borrow_mut())
                 },
             };
 
-            let buffer = read_borrow.get_buffer();
-            write_borrow.handle_write(&buffer);
+            write_borrow.handle_write();
 
             let has_to_close = proxy.is_upstream_closed();
 
@@ -155,7 +148,7 @@ impl MyHandler {
         if event_set.is_readable() {
             let (role, ref_proxy) = try!(self.proxy_locator.get(&token).ok_or("Token not found"));
 
-            let proxy = ref_proxy.borrow_mut();
+            let mut proxy = ref_proxy.borrow_mut();
             let ds = proxy.get_downstream();
             let us = proxy.get_upstream();
 
@@ -168,16 +161,22 @@ impl MyHandler {
                 },
             };
 
-            let bs = read_borrow.handle_read();
-            match bs {
-                BufferState::Full => {
-                    try!{event_loop.reregister(read_borrow.get_evented(), read_borrow.get_token(), EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).or(Err("Could not reregister the token"))};
-                },
-                _ => ()
-            }
+            let action = read_borrow.handle_read();
 
             // Add writable behaviour
             try!{event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).or(Err("Could not reregister the token"))};
+
+            drop(read_borrow);
+            drop(write_borrow);
+
+            match action {
+                ConnectionAction::Forward(a) => {
+                    proxy.forward(a, role);
+                },
+                _ => {
+                    ()
+                }
+            }
         }
 
         if event_set.is_hup() || event_set.is_error() {
