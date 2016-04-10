@@ -1,5 +1,5 @@
 [package]
-name = "miokernel"
+name = "rs_proxy"
 version = "0.1.0"
 authors = ["gnieto <gnieto.talo@gmail.com>"]
 

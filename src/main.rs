@@ -87,16 +87,13 @@ impl MyHandler {
         Ok((Rc::new(RefCell::new(downstream)), Rc::new(RefCell::new(upstream))))
     }
 
-    pub fn handle_accept(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token) -> Option<(Token, Token)>{
-        if !self.acceptors.contains_key(&token) {
-            return None
-        }
-
+    pub fn handle_accept(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token) -> Result<(Token, Token), &str> {
         info!("Inbound connection with token {:?}!", token);
 
         let tcp_stream = {
-            let acceptor = self.acceptors.get_mut(&token).unwrap();
-            let (tcp_stream, _) = acceptor.accept().unwrap().unwrap();
+            let acceptor = try!{self.acceptors.get_mut(&token).ok_or("Called handle accept on a non-accept token")};
+            let accept_result = try!{acceptor.accept().or(Err("Could not accept"))};
+            let (tcp_stream, _) = try!{accept_result.ok_or("Could not get a tcp stream")};
             tcp_stream
         };
 
@@ -116,7 +113,7 @@ impl MyHandler {
 
         info!("Registered downstream_connection {:?} and upstream_connection {:?}", downstream_token, upstream_token);
 
-        Some((downstream_token, upstream_token))
+        Ok((downstream_token, upstream_token))
     }
 
     pub fn handle_connection(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token, event_set: EventSet) {
@@ -266,7 +263,10 @@ impl Handler for MyHandler {
         if self.proxy_locator.has(&token) {
             self.handle_connection(event_loop, token, event_set);
         } else {
-            self.handle_accept(event_loop, token);
+            match self.handle_accept(event_loop, token) {
+                Err(s) => error!("{}", s),
+                _ => (),
+            }
         }
     }
 
