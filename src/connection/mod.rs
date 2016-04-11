@@ -3,7 +3,7 @@ use std::io;
 
 pub mod tcp_connection;
 // pub mod poison;
-pub mod buffer;
+// pub mod buffer;
 
 pub trait Connection: io::Read + io::Write {
     fn get_evented(&self) -> &Evented;

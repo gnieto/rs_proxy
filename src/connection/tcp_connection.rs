@@ -2,12 +2,13 @@ use mio::{Token, Evented};
 use mio::tcp::TcpStream;
 use connection::Connection;
 use connection::ConnectionAction;
-use connection::buffer::Buffer;
+use netbuf::Buf;
 use std::io;
+use std::cmp::min;
 
 pub struct TcpConnection {
-    input: Buffer,
-    output: Buffer,
+    input: Buf,
+    output: Buf,
     stream: TcpStream,
     token: Token,
 }
@@ -15,8 +16,8 @@ pub struct TcpConnection {
 impl TcpConnection {
     pub fn new(size: usize, stream: TcpStream, token: Token) -> Self {
         TcpConnection {
-            input: Buffer::new(size),
-            output: Buffer::new(size),
+            input: Buf::new(),
+            output: Buf::new(),
             stream: stream,
             token: token,
         }
@@ -25,38 +26,35 @@ impl TcpConnection {
 
 impl io::Read for TcpConnection {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let pending = self.input.pending();
-        let mut buf = &mut buf[0..pending];
-
-        {
-            let read_slice = self.input.get_read_slice();
-            buf.clone_from_slice(&read_slice[0..pending]);
+        let buf_size = buf.len();
+        let read_size = min(buf.len(), self.input.len());
+        if self.input.len() > 0 {
+            info!("{:?}: Buffer size: {} and input buffer: {}, read_size: {}", self.get_token(), buf_size, self.input.capacity(), read_size);
         }
-        self.input.advance(pending);
+        buf[0..read_size - 1].clone_from_slice(&self.input[0..read_size - 1]);
+        self.input.consume(read_size);
 
-        Ok(pending)
+        Ok(read_size)
     }
 }
 
 impl io::Write for TcpConnection {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let pending = self.output.pending();
-        {
-            let write_slice = self.output.get_write_slice();
-            if write_slice.len() > 0 {
-                info!("Somethin to write!");
-            }
-            write_slice.clone_from_slice(buf);
+        let buf_size = buf.len();
+        let write_size = min(buf.len(), self.output.capacity());
+        if self.output.len() > 0 {
+            info!("{:?}: Buffer size: {} and input buffer: {}, write_size: {}", self.get_token(), buf_size, self.input.capacity(), write_size);
         }
+        self.output.extend(buf);
+        // (&mut self.output[0..write_size]).clone_from_slice(&buf[0..write_size - 1]);
 
-        self.output.advance(pending);
-        Ok(pending)
+        Ok(write_size)
     }
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
-}
+ }
 
 impl Connection for TcpConnection {
     fn get_evented(&self) -> &Evented {
@@ -68,11 +66,10 @@ impl Connection for TcpConnection {
     }
 
     fn handle_read(&mut self) -> ConnectionAction {
-        use std::io::Read;
-
-        let read_result = self.stream.read(self.input.get_write_slice());
+        let read_result = self.input.read_from(&mut self.stream);
         match read_result {
             Ok(amount) => {
+                info!("Read to {:?} {} bytes on input", self.get_token(), amount);
                 if amount > 0 {
                     ConnectionAction::Forward(amount)
                 } else {
@@ -86,16 +83,12 @@ impl Connection for TcpConnection {
     }
 
     fn handle_write(&mut self) -> ConnectionAction {
-        use std::io::Write;
-
-        if self.output.pending() > 0 {
-            info!("Pending information to be written");
-        }
-
-        let write_result = self.stream.write(&self.output.get_read_slice());
+        info!("Handling write on token: {:?}", self.get_token());
+        let write_result = self.output.write_to(&mut self.stream);
         match write_result {
             Ok(amount) => {
-                self.output.advance(amount);
+                info!("Writting byes: {}", amount);
+                ()
             },
             Err(_) => {
                 error!("Could not read on the connection with token {:?}", self.token);

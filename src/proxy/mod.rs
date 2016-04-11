@@ -53,13 +53,13 @@ impl Proxy {
         let us = self.get_upstream();
 
         let (mut read_borrow, mut write_borrow) = match role {
-            Role::Downstream => {
+            Role::Upstream => {
                 let us_borrow = us.borrow_mut();
                 let ds_borrow = ds.borrow_mut();
 
                 (us_borrow, ds_borrow)
             },
-            Role::Upstream => {
+            Role::Downstream => {
                 let ds_borrow = ds.borrow_mut();
                 let us_borrow = us.borrow_mut();
 

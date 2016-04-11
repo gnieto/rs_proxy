@@ -1,6 +1,6 @@
 extern crate mio;
 extern crate bit_set;
-extern crate bytes;
+extern crate netbuf;
 #[macro_use]
 extern crate log;
 extern crate env_logger;
@@ -126,10 +126,10 @@ impl MyHandler {
             let us = proxy.get_upstream();
 
             let (_, mut write_borrow) = match role {
-                Role::Downstream => {
+                Role::Upstream => {
                     (ds.borrow(), us.borrow_mut())
                 },
-                Role::Upstream => {
+                Role::Downstream => {
                     (us.borrow(), ds.borrow_mut())
                 },
             };
@@ -142,7 +142,7 @@ impl MyHandler {
                 try!{event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).or(Err("Could not reregister the token"))};
             }
 
-            self.handle_downstream_close(event_loop, &token);
+            // self.handle_downstream_close(event_loop, &token);
         }
 
         if event_set.is_readable() {
