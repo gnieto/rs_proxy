@@ -119,31 +119,37 @@ impl MyHandler {
 
     pub fn handle_connection(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token, event_set: EventSet) -> Result<(), &str> {
         if event_set.is_writable() {
-            let (role, ref_proxy) = try!{self.proxy_locator.get(&token).ok_or("Token not found")};
+            let has_to_close = {
+                let (role, ref_proxy) = try!{self.proxy_locator.get(&token).ok_or("Token not found")};
 
-            let proxy = ref_proxy.borrow_mut();
-            let ds = proxy.get_downstream();
-            let us = proxy.get_upstream();
+                let proxy = ref_proxy.borrow_mut();
+                let ds = proxy.get_downstream();
+                let us = proxy.get_upstream();
 
-            let (_, mut write_borrow) = match role {
-                Role::Upstream => {
-                    (ds.borrow(), us.borrow_mut())
-                },
-                Role::Downstream => {
-                    (us.borrow(), ds.borrow_mut())
-                },
+                let (_, mut write_borrow) = match role {
+                    Role::Upstream => {
+                        (ds.borrow(), us.borrow_mut())
+                    },
+                    Role::Downstream => {
+                        (us.borrow(), ds.borrow_mut())
+                    },
+                };
+
+                write_borrow.handle_write();
+
+                let has_to_close = proxy.is_upstream_closed();
+
+                if !has_to_close {
+                    try!{event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).or(Err("Could not reregister the token"))};
+                }
+
+                has_to_close
             };
 
-            write_borrow.handle_write();
-
-            let has_to_close = proxy.is_upstream_closed();
-
-            if !has_to_close {
-                try!{event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).or(Err("Could not reregister the token"))};
-            }
-
             info!("Has to close: {}", has_to_close);
-            // self.handle_downstream_close(event_loop, &token);
+            if has_to_close {
+                self.handle_downstream_close(event_loop, &token);
+            }
         }
 
         if event_set.is_readable() {
@@ -187,7 +193,10 @@ impl MyHandler {
                     info!("Upstream cloased!");
                     ref_proxy.borrow_mut().upstream_closed();
                 },
-                _ => ()
+                _ => {
+                    info!("Downstream closed!");
+                    self.remove_proxy(event_loop, &token);
+                }
             }
         };
 
@@ -231,8 +240,6 @@ impl MyHandler {
 
         match tokens {
             Some((ds_token, us_token)) => {
-                // info!("Cleaning connections with tokens {:?} and {:?} has been removed", ds_token, us_token);
-
                 self.proxy_locator.unlink(&ds_token);
                 self.proxy_locator.unlink(&us_token);
 
