@@ -31,7 +31,7 @@ impl io::Read for TcpConnection {
         if self.input.len() > 0 {
             info!("{:?}: Buffer size: {} and input buffer: {}, read_size: {}", self.get_token(), buf_size, self.input.capacity(), read_size);
         }
-        buf[0..read_size - 1].clone_from_slice(&self.input[0..read_size - 1]);
+        buf[0..read_size].clone_from_slice(&self.input[0..read_size]);
         self.input.consume(read_size);
 
         Ok(read_size)
@@ -46,7 +46,6 @@ impl io::Write for TcpConnection {
             info!("{:?}: Buffer size: {} and input buffer: {}, write_size: {}", self.get_token(), buf_size, self.input.capacity(), write_size);
         }
         self.output.extend(buf);
-        // (&mut self.output[0..write_size]).clone_from_slice(&buf[0..write_size - 1]);
 
         Ok(write_size)
     }
@@ -70,6 +69,7 @@ impl Connection for TcpConnection {
         match read_result {
             Ok(amount) => {
                 info!("Read to {:?} {} bytes on input", self.get_token(), amount);
+
                 if amount > 0 {
                     ConnectionAction::Forward(amount)
                 } else {
@@ -87,7 +87,7 @@ impl Connection for TcpConnection {
         let write_result = self.output.write_to(&mut self.stream);
         match write_result {
             Ok(amount) => {
-                info!("Writting byes: {}", amount);
+                info!("Writting bytes: {}", amount);
                 ()
             },
             Err(_) => {

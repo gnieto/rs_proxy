@@ -97,7 +97,7 @@ impl MyHandler {
             tcp_stream
         };
 
-        let (downstream, upstream) = self.proxy("127.0.0.1:8001", tcp_stream).unwrap();
+        let (downstream, upstream) = self.proxy("127.0.0.1:6379", tcp_stream).unwrap();
 
         let proxy = Proxy::new(downstream, upstream);
         let (downstream_token, upstream_token) = proxy.tokens();
@@ -142,6 +142,7 @@ impl MyHandler {
                 try!{event_loop.reregister(write_borrow.get_evented(), write_borrow.get_token(), EventSet::readable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).or(Err("Could not reregister the token"))};
             }
 
+            info!("Has to close: {}", has_to_close);
             // self.handle_downstream_close(event_loop, &token);
         }
 
@@ -183,6 +184,7 @@ impl MyHandler {
             let (role, ref_proxy) = try!{self.proxy_locator.get(&token).ok_or("Token not found")};
             match role {
                 Role::Upstream => {
+                    info!("Upstream cloased!");
                     ref_proxy.borrow_mut().upstream_closed();
                 },
                 _ => ()
