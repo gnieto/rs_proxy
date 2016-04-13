@@ -22,9 +22,9 @@ use log::{LogRecord, LogLevelFilter};
 use env_logger::LogBuilder;
 use proxy::Proxy;
 use proxy::ProxyLocator;
-use connection::{Connection, Role, ConnectionAction};
+use connection::{Connection, Role, ConnectionAction, Timer, TimerAction};
 use connection::tcp_connection::TcpConnection;
-use connection::poison::DropAllConnection;
+use connection::poison::Throttler;
 
 fn main() {
     initialize_logger();
@@ -44,6 +44,7 @@ fn main() {
 struct MyHandler {
     proxy_locator: ProxyLocator,
     acceptors: HashMap<Token, TcpListener>,
+    timers: HashMap<Token, Rc<RefCell<Timer>>>,
     tokens: BitSet,
 }
 
@@ -53,6 +54,7 @@ impl MyHandler {
             tokens: BitSet::with_capacity(4096), // TODO: Read from EventLoop configuration
             proxy_locator: ProxyLocator::new(),
             acceptors: HashMap::new(),
+            timers: HashMap::new(),
         }
     }
 
@@ -84,7 +86,7 @@ impl MyHandler {
         let downstream = TcpConnection::new(stream, downstream_token);
         let stream = try!(TcpStream::connect(&addr).or(Err("Could not connect to upstream")));
         let upstream = TcpConnection::new(stream, upstream_token);
-        let upstream = DropAllConnection::new(Box::new(upstream));
+        let upstream = Throttler::new(Box::new(upstream), 100);
 
         Ok((Rc::new(RefCell::new(downstream)), Rc::new(RefCell::new(upstream))))
     }
@@ -99,9 +101,21 @@ impl MyHandler {
             tcp_stream
         };
 
-        let (downstream, upstream) = self.proxy("127.0.0.1:6379", tcp_stream).unwrap();
+        // let (downstream, upstream) = self.proxy("127.0.0.1:6379", tcp_stream).unwrap();
+        let addr: SocketAddr = try!("127.0.0.1:6379".parse().or(Err("Could not parse the listening address")));
+        let downstream_token = try!(self.claim_token().ok_or("No more tokens available for downstream"));
+        let upstream_token = try!(self.claim_token().ok_or("No more tokens available for upstream"));
+        let downstream = TcpConnection::new(tcp_stream, downstream_token);
+        let stream = try!(TcpStream::connect(&addr).or(Err("Could not connect to upstream")));
+        let upstream = TcpConnection::new(stream, upstream_token);
+        let upstream = Throttler::new(Box::new(upstream), 100);
 
-        let proxy = Proxy::new(downstream, upstream);
+        let downstream = Rc::new(RefCell::new(downstream));
+        let upstream = Rc::new(RefCell::new(upstream));
+
+        // Ok((Rc::new(RefCell::new(downstream)), Rc::new(RefCell::new(upstream))))
+
+        let proxy = Proxy::new(downstream, upstream.clone());
         let (downstream_token, upstream_token) = proxy.tokens();
 
         let ds = proxy.get_downstream();
@@ -109,10 +123,12 @@ impl MyHandler {
 
         event_loop.register(ds.borrow().get_evented(), downstream_token, EventSet::readable() | EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
         event_loop.register(us.borrow().get_evented(), upstream_token, EventSet::readable() | EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
+        event_loop.timeout_ms(upstream_token, 50);
 
         let bp = Rc::new(RefCell::new(proxy));
         self.proxy_locator.link(downstream_token, Role::Downstream, bp.clone());
         self.proxy_locator.link(upstream_token, Role::Upstream, bp.clone());
+        self.timers.insert(upstream_token, upstream.clone());
 
         info!("Registered downstream_connection {:?} and upstream_connection {:?}", downstream_token, upstream_token);
 
@@ -254,6 +270,24 @@ impl MyHandler {
             None => {()}
         }
     }
+
+    pub fn handle_timer(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token) {
+        match self.timers.get(&token) {
+            Some(ref timer) => {
+                let mut timer = timer.borrow_mut();
+                match timer.handle_timer() {
+                    TimerAction::Continue => {
+                        event_loop.timeout_ms(token, timer.get_frequency());
+                    },
+                    _ => (),
+                }
+                info!("Handling timer!");
+            },
+            None => {
+                info!("Tick on an unexisting timer");
+            }
+        }
+    }
 }
 
 impl Handler for MyHandler {
@@ -275,6 +309,12 @@ impl Handler for MyHandler {
                 _ => (),
             }
         }
+    }
+
+    fn timeout(&mut self, event_loop: &mut EventLoop<MyHandler>, mut token: Token) {
+        /*info!("Timeout at 50ms");
+        event_loop.timeout_ms(token, 50);*/
+        self.handle_timer(event_loop, token);
     }
 
     fn notify(&mut self, event_loop: &mut EventLoop<MyHandler>, _: u32) {

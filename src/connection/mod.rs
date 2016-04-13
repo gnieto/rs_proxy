@@ -12,6 +12,11 @@ pub trait Connection: io::Read + io::Write {
     fn handle_write(&mut self) -> ConnectionAction;
 }
 
+pub trait Timer {
+    fn handle_timer(&mut self) -> TimerAction;
+    fn get_frequency(&self) -> u64;
+}
+
 #[derive(Copy,Clone,Debug)]
 pub enum Role {
     Downstream,
@@ -24,4 +29,9 @@ pub enum ConnectionAction {
     Hold,
     Halt,
     Noop,
+}
+
+pub enum TimerAction {
+    Continue,
+    Stop,
 }
