@@ -14,7 +14,7 @@ pub struct TcpConnection {
 }
 
 impl TcpConnection {
-    pub fn new(size: usize, stream: TcpStream, token: Token) -> Self {
+    pub fn new(stream: TcpStream, token: Token) -> Self {
         TcpConnection {
             input: Buf::new(),
             output: Buf::new(),
@@ -71,7 +71,7 @@ impl Connection for TcpConnection {
                 info!("Read to {:?} {} bytes on input", self.get_token(), amount);
 
                 if amount > 0 {
-                    ConnectionAction::Forward(amount)
+                    ConnectionAction::Forward
                 } else {
                     ConnectionAction::Noop
                 }

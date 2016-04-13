@@ -80,9 +80,9 @@ impl MyHandler {
         let downstream_token = try!(self.claim_token().ok_or("No more tokens available for downstream"));
         let upstream_token = try!(self.claim_token().ok_or("No more tokens available for upstream"));
 
-        let downstream = TcpConnection::new(1024, stream, downstream_token);
+        let downstream = TcpConnection::new(stream, downstream_token);
         let stream = try!(TcpStream::connect(&addr).or(Err("Could not connect to upstream")));
-        let upstream = TcpConnection::new(1024, stream, upstream_token);
+        let upstream = TcpConnection::new(stream, upstream_token);
 
         Ok((Rc::new(RefCell::new(downstream)), Rc::new(RefCell::new(upstream))))
     }
@@ -148,7 +148,10 @@ impl MyHandler {
 
             info!("Has to close: {}", has_to_close);
             if has_to_close {
-                self.handle_downstream_close(event_loop, &token);
+                match self.handle_downstream_close(event_loop, &token) {
+                    Err(e) => error!("Error closing connection with error: {}", e),
+                    _ => (),
+                }
             }
         }
 
@@ -177,8 +180,8 @@ impl MyHandler {
             drop(write_borrow);
 
             match action {
-                ConnectionAction::Forward(a) => {
-                    proxy.forward(a, role);
+                ConnectionAction::Forward => {
+                    proxy.forward(role);
                 },
                 _ => {
                     ()
@@ -252,7 +255,7 @@ impl MyHandler {
 }
 
 impl Handler for MyHandler {
-    type Timeout = ();
+    type Timeout = Token;
     type Message = u32;
 
     fn ready(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token, event_set: EventSet) {

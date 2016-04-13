@@ -48,7 +48,7 @@ impl Proxy {
         self.upstream_closed
     }
 
-    pub fn forward(&mut self, amount: usize, role: Role) {
+    pub fn forward(&mut self, role: Role) {
         let ds = self.get_downstream();
         let us = self.get_upstream();
 

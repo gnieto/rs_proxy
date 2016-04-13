@@ -20,8 +20,7 @@ pub enum Role {
 
 #[derive(Debug)]
 pub enum ConnectionAction {
-    ForwardAll,
-    Forward(usize),
+    Forward,
     Hold,
     Halt,
     Noop,
