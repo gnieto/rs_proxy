@@ -2,7 +2,7 @@ use mio::{Evented, Token};
 use std::io;
 
 pub mod tcp_connection;
-// pub mod poison;
+pub mod poison;
 // pub mod buffer;
 
 pub trait Connection: io::Read + io::Write {

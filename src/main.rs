@@ -24,6 +24,7 @@ use proxy::Proxy;
 use proxy::ProxyLocator;
 use connection::{Connection, Role, ConnectionAction};
 use connection::tcp_connection::TcpConnection;
+use connection::poison::DropAllConnection;
 
 fn main() {
     initialize_logger();
@@ -83,6 +84,7 @@ impl MyHandler {
         let downstream = TcpConnection::new(stream, downstream_token);
         let stream = try!(TcpStream::connect(&addr).or(Err("Could not connect to upstream")));
         let upstream = TcpConnection::new(stream, upstream_token);
+        let upstream = DropAllConnection::new(Box::new(upstream));
 
         Ok((Rc::new(RefCell::new(downstream)), Rc::new(RefCell::new(upstream))))
     }
