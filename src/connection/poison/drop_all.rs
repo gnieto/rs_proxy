@@ -5,6 +5,7 @@ use std::io::Write;
 use std::io::Result;
 use mio::Token;
 use mio::Evented;
+use mio::EventSet;
 
 pub struct DropAllConnection {
     connection: Box<Connection>,
@@ -32,6 +33,10 @@ impl Connection for DropAllConnection {
 
     fn handle_write(&mut self) -> ConnectionAction {
         ConnectionAction::Noop
+    }
+
+    fn get_interest(&self) -> EventSet {
+        self.connection.get_interest()
     }
 }
 
