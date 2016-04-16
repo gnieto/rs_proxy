@@ -1,4 +1,4 @@
-use mio::{Evented, Token};
+use mio::{Evented, Token, EventSet};
 use std::io;
 
 pub mod tcp_connection;
@@ -8,6 +8,7 @@ pub mod poison;
 pub trait Connection: io::Read + io::Write {
     fn get_evented(&self) -> &Evented;
     fn get_token(&self) -> Token;
+    fn get_interest(&self) -> EventSet;
     fn handle_read(&mut self) -> ConnectionAction;
     fn handle_write(&mut self) -> ConnectionAction;
 }

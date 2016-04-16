@@ -81,6 +81,19 @@ impl Proxy {
             }
         };
     }
+
+    pub fn get_from_token(&self, token: Token) -> Option<Rc<RefCell<Connection>>> {
+        let tokens = self.tokens();
+        if tokens.0 == token {
+            return Some(self.get_downstream())
+        }
+
+        if tokens.1 == token {
+            return Some(self.get_upstream())
+        }
+
+        None
+    }
 }
 
 pub struct ProxyLocator {

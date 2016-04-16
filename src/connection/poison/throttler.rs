@@ -6,10 +6,12 @@ use std::io::Result;
 use mio::Token;
 use mio::Evented;
 use std::cmp::min;
+use mio::EventSet;
 
 pub struct Throttler {
     connection: Box<Connection>,
     size: usize,
+    interest: EventSet,
 }
 
 impl Throttler {
@@ -18,6 +20,7 @@ impl Throttler {
         Throttler {
             connection: connection,
             size: size,
+            interest: EventSet::error() | EventSet::hup(),
         }
     }
 }
@@ -32,22 +35,30 @@ impl Connection for Throttler {
     }
 
     fn handle_read(&mut self) -> ConnectionAction {
+        self.interest = self.interest & !EventSet::readable();
+
         return self.connection.handle_read()
     }
 
     fn handle_write(&mut self) -> ConnectionAction {
+        self.interest = self.interest & !EventSet::writable();
+
         return self.connection.handle_write()
+    }
+
+    fn get_interest(&self) -> EventSet {
+        self.connection.get_interest() & self.interest
     }
 }
 
 impl Timer for Throttler {
     fn handle_timer(&mut self) -> TimerAction {
-        info!("Tick!");
+        self.interest = self.interest | EventSet::writable();
         TimerAction::Continue
     }
 
     fn get_frequency(&self) -> u64 {
-        50
+        2000
     }
 }
 

@@ -88,7 +88,7 @@ impl MyHandler {
         let downstream = TcpConnection::new(stream, downstream_token);
         let stream = try!(TcpStream::connect(&addr).or(Err("Could not connect to upstream")));
         let upstream = TcpConnection::new(stream, upstream_token);
-        let upstream = Throttler::new(Box::new(upstream), 100);
+        let upstream = Throttler::new(Box::new(upstream), 1);
 
         Ok((Rc::new(RefCell::new(downstream)), Rc::new(RefCell::new(upstream))))
     }
@@ -110,7 +110,7 @@ impl MyHandler {
         let downstream = TcpConnection::new(tcp_stream, downstream_token);
         let stream = try!(TcpStream::connect(&addr).or(Err("Could not connect to upstream")));
         let upstream = TcpConnection::new(stream, upstream_token);
-        let upstream = Throttler::new(Box::new(upstream), 100);
+        let upstream = Throttler::new(Box::new(upstream), 10);
 
         let downstream = Rc::new(RefCell::new(downstream));
         let upstream = Rc::new(RefCell::new(upstream));
@@ -123,8 +123,8 @@ impl MyHandler {
         let ds = proxy.get_downstream();
         let us = proxy.get_upstream();
 
-        event_loop.register(ds.borrow().get_evented(), downstream_token, EventSet::readable() | EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
-        event_loop.register(us.borrow().get_evented(), upstream_token, EventSet::readable() | EventSet::writable() | EventSet::hup() | EventSet::error(), PollOpt::edge()).unwrap();
+        event_loop.register(ds.borrow().get_evented(), downstream_token, ds.borrow().get_interest(), PollOpt::edge()).unwrap();
+        event_loop.register(us.borrow().get_evented(), upstream_token, us.borrow().get_interest(), PollOpt::edge()).unwrap();
         event_loop.timeout_ms(upstream_token, 50);
 
         let bp = Rc::new(RefCell::new(proxy));
@@ -176,6 +176,7 @@ impl MyHandler {
         }
 
         if event_set.is_readable() {
+            info!("Token {:?} is readable", token);
             let (role, ref_proxy) = try!(self.proxy_locator.get(&token).ok_or("Token not found"));
 
             let mut proxy = ref_proxy.borrow_mut();
@@ -273,7 +274,7 @@ impl MyHandler {
         }
     }
 
-    pub fn handle_timer(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token) {
+    pub fn handle_timer(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token) -> Result<(), &str> {
         match self.timers.get(&token) {
             Some(ref timer) => {
                 let mut timer = timer.borrow_mut();
@@ -283,12 +284,32 @@ impl MyHandler {
                     },
                     _ => (),
                 }
-                info!("Handling timer!");
             },
             None => {
                 info!("Tick on an unexisting timer");
             }
-        }
+        };
+
+        try!{self.register_token(event_loop, token)};
+        Ok(())
+    }
+
+    fn register_token(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token) -> Result<(), &str> {
+        match self.proxy_locator.get(&token)
+        {
+            Some((_, ref_proxy)) => {
+                let proxy = ref_proxy.borrow();
+                let connection = try!{proxy.get_from_token(token).ok_or("Token not found on proxy")};
+
+                info!("Reregistering token {:?} with interest: {:?}", token, connection.borrow().get_interest());
+                event_loop.register(connection.borrow().get_evented(), token, connection.borrow().get_interest(), PollOpt::edge());
+            },
+            None => {
+                ()
+            }
+        };
+
+        Ok(())
     }
 }
 

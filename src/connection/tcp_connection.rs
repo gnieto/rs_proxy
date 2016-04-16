@@ -1,4 +1,4 @@
-use mio::{Token, Evented};
+use mio::{Token, Evented, EventSet};
 use mio::tcp::TcpStream;
 use connection::Connection;
 use connection::ConnectionAction;
@@ -11,6 +11,7 @@ pub struct TcpConnection {
     output: Buf,
     stream: TcpStream,
     token: Token,
+    interest: EventSet,
 }
 
 impl TcpConnection {
@@ -20,6 +21,7 @@ impl TcpConnection {
             output: Buf::new(),
             stream: stream,
             token: token,
+            interest: EventSet::all(),
         }
     }
 }
@@ -96,5 +98,9 @@ impl Connection for TcpConnection {
         };
 
         ConnectionAction::Noop
+    }
+
+    fn get_interest(&self) -> EventSet {
+        self.interest
     }
 }
