@@ -4,6 +4,7 @@ extern crate netbuf;
 #[macro_use]
 extern crate log;
 extern crate env_logger;
+extern crate ansi_term;
 
 pub mod proxy;
 pub mod connection;
@@ -16,9 +17,10 @@ use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
-
+use ansi_term::Colour::{ Red, Green, Yellow, Blue, Purple};
+use ansi_term::Style;
 use std::env;
-use log::{LogRecord, LogLevelFilter};
+use log::{LogRecord, LogLevelFilter, LogLevel};
 use env_logger::LogBuilder;
 use proxy::Proxy;
 use proxy::ProxyLocator;
@@ -338,7 +340,16 @@ impl Handler for MyHandler {
 
 fn initialize_logger() {
 	let format = |record: &LogRecord| {
-        format!("{} - {}:{} - {}", record.level(), record.location().file(), record.location().line(), record.args())
+        let level = match record.level() {
+            LogLevel::Info => format!("{}", Blue.bold().paint(format!("{}", record.level()))),
+            LogLevel::Error => format!("{}", Red.bold().paint(format!("{}", record.level()))),
+            LogLevel::Debug => format!("{}", Green.bold().paint(format!("{}", record.level()))),
+            LogLevel::Warn => format!("{}", Yellow.bold().paint(format!("{}", record.level()))),
+            LogLevel::Trace => format!("{}", Purple.bold().paint(format!("{}", record.level()))),
+        };
+
+        let location = format!("{}", Style::default().bold().paint(format!("{}:{}", record.location().file(), record.location().line())));
+        format!("{} - {} - {}", level, location, record.args())
     };
 
     let mut builder = LogBuilder::new();
