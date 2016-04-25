@@ -16,13 +16,32 @@ pub struct TcpConnection {
 
 impl TcpConnection {
     pub fn new(stream: TcpStream, token: Token) -> Self {
+        let o = Buf::new();
+        info!("Out buff: {}", o.capacity());
+
         TcpConnection {
             input: Buf::new(),
-            output: Buf::new(),
+            output: o,
             stream: stream,
             token: token,
             interest: EventSet::all(),
         }
+    }
+
+    pub fn get_input(&self) -> &Buf {
+        &self.input
+    }
+
+    pub fn get_output(&self) -> &Buf {
+        &self.output
+    }
+
+    pub fn get_mut_input(&mut self) -> &mut Buf {
+        &mut self.input
+    }
+
+    pub fn get_mut_output(&mut self) -> &mut Buf {
+        &mut self.output
     }
 }
 
@@ -43,13 +62,11 @@ impl io::Read for TcpConnection {
 impl io::Write for TcpConnection {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let buf_size = buf.len();
-        let write_size = min(buf.len(), self.output.capacity());
-        if self.output.len() > 0 {
-            info!("{:?}: Buffer size: {} and input buffer: {}, write_size: {}", self.get_token(), buf_size, self.input.capacity(), write_size);
-        }
+
+        info!("{:?}: Buffer size: {} and input buffer: {}, write_size: {}", self.get_token(), buf_size, self.input.capacity(), buf_size);
         self.output.extend(buf);
 
-        Ok(write_size)
+        Ok(buf_size)
     }
 
     fn flush(&mut self) -> io::Result<()> {

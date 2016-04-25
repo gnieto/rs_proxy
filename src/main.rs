@@ -5,6 +5,8 @@ extern crate netbuf;
 extern crate log;
 extern crate env_logger;
 extern crate ansi_term;
+// #[cfg(redis)]
+extern crate resp;
 
 pub mod proxy;
 pub mod connection;
@@ -27,6 +29,9 @@ use proxy::ProxyLocator;
 use connection::{Connection, Role, ConnectionAction, Timer, TimerAction};
 use connection::tcp_connection::TcpConnection;
 use connection::poison::Throttler;
+// #[cfg(redis)]
+use connection::redis::RedisConnection;
+use connection::redis::{ComposedProxy, LogProxy, PrefixProxy};
 
 fn main() {
     initialize_logger();
@@ -79,19 +84,6 @@ impl MyHandler {
         self.tokens.remove(token.as_usize());
     }
 
-    pub fn proxy(&mut self, input: &str, stream: TcpStream) -> Result<(Rc<RefCell<Connection>>, Rc<RefCell<Connection>>), &str> {
-        let addr: SocketAddr = try!(input.parse().or(Err("Could not parse the listening address")));
-
-        let downstream_token = try!(self.claim_token().ok_or("No more tokens available for downstream"));
-        let upstream_token = try!(self.claim_token().ok_or("No more tokens available for upstream"));
-
-        let downstream = TcpConnection::new(stream, downstream_token);
-        let stream = try!(TcpStream::connect(&addr).or(Err("Could not connect to upstream")));
-        let upstream = TcpConnection::new(stream, upstream_token);
-        let upstream = Throttler::new(Box::new(upstream), 1);
-
-        Ok((Rc::new(RefCell::new(downstream)), Rc::new(RefCell::new(upstream))))
-    }
 
     pub fn handle_accept(&mut self, event_loop: &mut EventLoop<MyHandler>, token: Token) -> Result<(Token, Token), &str> {
         info!("Inbound connection with token {:?}!", token);
@@ -110,12 +102,12 @@ impl MyHandler {
         let downstream = TcpConnection::new(tcp_stream, downstream_token);
         let stream = try!(TcpStream::connect(&addr).or(Err("Could not connect to upstream")));
         let upstream = TcpConnection::new(stream, upstream_token);
-        let upstream = Throttler::new(Box::new(upstream), 10);
+        let log = ComposedProxy::new(LogProxy, PrefixProxy);
+        let downstream = RedisConnection::new(downstream, log);
+        // let downstream = RedisPrefixConnection::new(downstream);
 
         let downstream = Rc::new(RefCell::new(downstream));
         let upstream = Rc::new(RefCell::new(upstream));
-
-        // Ok((Rc::new(RefCell::new(downstream)), Rc::new(RefCell::new(upstream))))
 
         let proxy = Proxy::new(downstream, upstream.clone());
         let (downstream_token, upstream_token) = proxy.tokens();
@@ -125,12 +117,10 @@ impl MyHandler {
 
         event_loop.register(ds.borrow().get_evented(), downstream_token, ds.borrow().get_interest(), PollOpt::edge()).unwrap();
         event_loop.register(us.borrow().get_evented(), upstream_token, us.borrow().get_interest(), PollOpt::edge()).unwrap();
-        event_loop.timeout_ms(upstream_token, 50);
 
         let bp = Rc::new(RefCell::new(proxy));
         self.proxy_locator.link(downstream_token, Role::Downstream, bp.clone());
         self.proxy_locator.link(upstream_token, Role::Upstream, bp.clone());
-        self.timers.insert(upstream_token, upstream.clone());
 
         info!("Registered downstream_connection {:?} and upstream_connection {:?}", downstream_token, upstream_token);
 

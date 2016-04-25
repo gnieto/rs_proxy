@@ -3,7 +3,8 @@ use std::io;
 
 pub mod tcp_connection;
 pub mod poison;
-// pub mod buffer;
+// #[cfg(redis)]
+pub mod redis;
 
 pub trait Connection: io::Read + io::Write {
     fn get_evented(&self) -> &Evented;
