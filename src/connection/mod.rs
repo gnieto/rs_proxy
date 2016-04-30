@@ -7,6 +7,9 @@ pub mod poison;
 #[cfg(feature = "redis")]
 pub mod redis;
 
+#[cfg(feature = "http")]
+pub mod http;
+
 pub trait Connection: io::Read + io::Write {
     fn get_evented(&self) -> &Evented;
     fn get_token(&self) -> Token;

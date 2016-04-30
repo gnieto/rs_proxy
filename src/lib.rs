@@ -9,5 +9,8 @@ extern crate ansi_term;
 #[cfg(feature = "redis")]
 extern crate resp;
 
+#[cfg(feature = "http")]
+extern crate httparse;
+
 pub mod proxy;
 pub mod connection;
