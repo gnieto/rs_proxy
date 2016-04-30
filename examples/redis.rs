@@ -1,3 +1,4 @@
+extern crate rs_proxy;
 extern crate mio;
 extern crate bit_set;
 extern crate netbuf;
@@ -5,11 +6,9 @@ extern crate netbuf;
 extern crate log;
 extern crate env_logger;
 extern crate ansi_term;
-// #[cfg(redis)]
-extern crate resp;
 
-pub mod proxy;
-pub mod connection;
+#[cfg(feature = "redis")]
+extern crate resp;
 
 use mio::*;
 use mio::tcp::{TcpListener, TcpStream};
@@ -24,14 +23,15 @@ use ansi_term::Style;
 use std::env;
 use log::{LogRecord, LogLevelFilter, LogLevel};
 use env_logger::LogBuilder;
-use proxy::Proxy;
-use proxy::ProxyLocator;
-use connection::{Connection, Role, ConnectionAction, Timer, TimerAction};
-use connection::tcp_connection::TcpConnection;
-use connection::poison::Throttler;
-// #[cfg(redis)]
-use connection::redis::RedisConnection;
-use connection::redis::{ComposedProxy, LogProxy, PrefixProxy};
+use rs_proxy::proxy::Proxy;
+use rs_proxy::proxy::ProxyLocator;
+use rs_proxy::connection::{Connection, Role, ConnectionAction, Timer, TimerAction};
+use rs_proxy::connection::tcp_connection::TcpConnection;
+use rs_proxy::connection::poison::Throttler;
+
+#[cfg(feature = "redis")]
+use rs_proxy::connection::redis::RedisConnection;
+use rs_proxy::connection::redis::{ComposedProxy, LogProxy, PrefixProxy};
 
 fn main() {
     initialize_logger();

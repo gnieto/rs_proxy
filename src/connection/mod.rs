@@ -3,7 +3,7 @@ use std::io;
 
 pub mod tcp_connection;
 pub mod poison;
-// #[cfg(redis)]
+
 pub mod redis;
 
 pub trait Connection: io::Read + io::Write {
