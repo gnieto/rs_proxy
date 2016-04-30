@@ -1,9 +1,13 @@
+pub use self::round_robin::*;
+
 use connection::Connection;
 use connection::Role;
 use mio::Token;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
+
+mod round_robin;
 
 pub struct Proxy {
     downstream: Rc<RefCell<Connection>>,
